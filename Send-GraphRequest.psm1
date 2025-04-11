@@ -35,6 +35,9 @@
 .PARAMETER VerboseMode
     Enable detailed logging.
 
+.PARAMETER Suppress404
+    Supress 404 error messages
+
 .PARAMETER AdditionalHeaders
     Add additional headers, example -AdditionalHeaders @{ 'ConsistencyLevel' = 'eventual' }
 
@@ -42,19 +45,19 @@
     Query parameters for more complex queries (e.g. -QueryParameters @{ '$filter' = "startswith(displayName,'Alex')" })
 
 .EXAMPLE
-    Send-MSGraphRequest -AccessToken $token -Method GET -Uri '/users'
+    Send-GraphRequest -AccessToken $token -Method GET -Uri '/users'
 
 .EXAMPLE
-    Send-MSGraphRequest -AccessToken $token -Method GET -Uri '/groups?$select=displayName' -VerboseMode
+    Send-GraphRequest -AccessToken $token -Method GET -Uri '/groups?$select=displayName' -VerboseMode
 
 .EXAMPLE
-    Send-MSGraphRequest -AccessToken $token -Method GET -Uri '/groups?$select=displayName' -proxy "http://127.0.0.1:8080"
+    Send-GraphRequest -AccessToken $token -Method GET -Uri '/groups?$select=displayName' -proxy "http://127.0.0.1:8080"
 
 .EXAMPLE
-    Send-MSGraphRequest -AccessToken $token -Method GET -Uri '/users' -AdditionalHeaders @{ 'ConsistencyLevel' = 'eventual' }
+    Send-GraphRequest -AccessToken $token -Method GET -Uri '/users' -AdditionalHeaders @{ 'ConsistencyLevel' = 'eventual' }
 
 .EXAMPLE 
-    Send-MSGraphRequest -AccessToken $token -Method GET -Uri '/users' -QueryParameters @{ '$filter' = "startswith(displayName,'Alex')" } -Proxy "http://127.0.0.1:8080"
+    Send-GraphRequest -AccessToken $token -Method GET -Uri '/users' -QueryParameters @{ '$filter' = "startswith(displayName,'Alex')" }"
 
 .EXAMPLE 
     $Body = @{
@@ -64,7 +67,7 @@
         securityEnabled = $true
         groupTypes      = @()
     }
-    $result = Send-MSGraphRequest -AccessToken $token -Method POST -Uri "/groups" -Body $Body -VerboseMode -Proxy "http://127.0.0.1:8080"
+    $result = Send-GraphRequest -AccessToken $token -Method POST -Uri "/groups" -Body $Body -VerboseMode
     
 
 .NOTES
@@ -72,7 +75,8 @@
     GitHub: https://github.com/zh54321/GraphRequest
 #>
 
-function Send-MSGraphRequest {
+function Send-GraphRequest {
+    [CmdletBinding()]
     param (
         [Parameter(Mandatory)]
         [string]$AccessToken,
@@ -90,6 +94,7 @@ function Send-MSGraphRequest {
         [switch]$RawJson,
         [string]$Proxy,
         [switch]$VerboseMode,
+        [switch]$Suppress404,
         [hashtable]$QueryParameters,
         [hashtable]$AdditionalHeaders,
         [int]$JsonDepthResponse = 10
@@ -112,7 +117,7 @@ function Send-MSGraphRequest {
     #Define basic headers
     $Headers = @{
         Authorization  = "Bearer $AccessToken"
-        'Content-Type' = 'application/json'
+        'Content-Type' = 'application/json; odata.metadata=minimal'
         'User-Agent'   = $UserAgent
     }
 
@@ -147,8 +152,13 @@ function Send-MSGraphRequest {
 
             $Response = Invoke-RestMethod @irmParams
 
-            if ($Response.value) {
-                $Results += $Response.value
+            if ($Response.PSObject.Properties.Name -contains 'value') {
+                if ($Response.value.Count -eq 0) {
+                    if ($VerboseMode) { Write-Host "[i] Empty 'value' array detected. Returning nothing." }
+                    return
+                } else {
+                    $Results += $Response.value
+                }
             } else {
                 $Results += $Response
             }
@@ -162,9 +172,13 @@ function Send-MSGraphRequest {
                 $irmParams.Remove('Body')
 
                 $Response = Invoke-RestMethod @irmParams
-
-                if ($Response.value) {
-                    $Results += $Response.value
+                if ($Response.PSObject.Properties.Name -contains 'value') {
+                    if ($Response.value.Count -eq 0) {
+                        if ($VerboseMode) { Write-Host "[i] Empty 'value' array detected. Returning nothing." }
+                        return
+                    } else {
+                        $Results += $Response.value
+                    }
                 } else {
                     $Results += $Response
                 }
@@ -175,26 +189,50 @@ function Send-MSGraphRequest {
         catch {
             $StatusCode = $_.Exception.Response.StatusCode.value__
             $StatusDesc = $_.Exception.Message
+            # Map HTTP status code to a PowerShell ErrorCategory
+            switch ($StatusCode) {
+                400 { $errorCategory = [System.Management.Automation.ErrorCategory]::InvalidArgument }
+                401 { $errorCategory = [System.Management.Automation.ErrorCategory]::AuthenticationError }
+                403 { $errorCategory = [System.Management.Automation.ErrorCategory]::PermissionDenied }
+                404 { $errorCategory = [System.Management.Automation.ErrorCategory]::ObjectNotFound }
+                409 { $errorCategory = [System.Management.Automation.ErrorCategory]::ResourceExists }
+                429 { $errorCategory = [System.Management.Automation.ErrorCategory]::LimitsExceeded }
+                500 { $errorCategory = [System.Management.Automation.ErrorCategory]::InvalidResult }
+                502 { $errorCategory = [System.Management.Automation.ErrorCategory]::ProtocolError }
+                503 { $errorCategory = [System.Management.Automation.ErrorCategory]::ResourceUnavailable }
+                504 { $errorCategory = [System.Management.Automation.ErrorCategory]::OperationTimeout }
+                default { $errorCategory = [System.Management.Automation.ErrorCategory]::NotSpecified }
+            }
 
-            Write-Host "[!] Error: [$StatusCode] $StatusDesc"
-
-            if ($StatusCode -in @(429,500,502,503,504) -and $RetryCount -lt $MaxRetries) {
+             if ($StatusCode -in @(429,500,502,503,504) -and $RetryCount -lt $MaxRetries) {
                 $RetryAfter = $_.Exception.Response.Headers['Retry-After']
                 if ($RetryAfter) {
-                    Write-Host "[i] Throttled. Retrying after $RetryAfter seconds..."
+                    Write-Host "[i] [$StatusCode] - Throttled. Retrying after $RetryAfter seconds..."
                     Start-Sleep -Seconds ([int]$RetryAfter)
                 } elseif ($RetryCount -eq 0) {
-                    Write-Host "[*] Retrying immediately..."
+                    Write-Host "[*] [$StatusCode] - Retrying immediately..."
                     Start-Sleep -Seconds 0
                 } else {
                     $Backoff = 2 * $RetryCount
-                    Write-Host "[*] Retrying in $Backoff seconds..."
+                    Write-Host "[*] [$StatusCode] - Retrying in $Backoff seconds..."
                     Start-Sleep -Seconds $Backoff
                 }
                 $RetryCount++
-            }
-            else {
-                Write-Host "[!] Failed after $RetryCount retries."
+            } else {
+                if (-not ($StatusCode -eq 404 -and $Suppress404)) {
+                    $msg = "[!] Graph API request failed after $RetryCount retries. Status: $StatusCode. Message: $StatusDesc"
+                    $exception = New-Object System.Exception($msg)   
+
+                    $errorRecord = New-Object System.Management.Automation.ErrorRecord (
+                        $exception,
+                        "GraphApiRequestFailed",
+                        $errorCategory,
+                        $FullUri
+                    )
+                    
+                    Write-Error $errorRecord
+                }
+
                 return
             }
         }

@@ -3,7 +3,16 @@
 ## Introduction
 
 The `GraphRequest` PowerShell module allows to send single requests to the Microsoft Graph API.
-It supports automatic throttling handling, pagination, and can return results in either PowerShell object format or raw JSON.
+
+Key features:
+- Handles Microsoft Graph v1.0 and Beta APIs
+- Automatic Pagination Support
+- Retry Logic with exponential Backoff for transient errors (e.g. 429, 503)
+- Custom Headers and Query Parameters for flexible API queries
+- Optional Raw JSON Output
+- Simple HTTP Proxy Support (for debugging)
+- Verbose Logging Option
+- User-Agent Customization
 
 Note: 
 - Cleartext access tokens can be obtained, for example, using [EntraTokenAid](https://github.com/zh54321/EntraTokenAid).
@@ -26,6 +35,7 @@ Note:
 | `-QueryParameters`           | Query parameters for more complex queries                                                   |
 | `-AdditionalHeaders`         | Add additional HTTP headers (e.g. for ConsistencyLevel)                                     |
 | `-JsonDepthResponse` *(Default: 10)* | Specifies the depth for JSON conversion (request). Useful for deeply nested objects in combination with `-RawJson`.  |
+| `-$Suppress404`              | Supress 404 Messages (example if a queried User object is not found in the tenant)          |          
 
 ## Examples
 
@@ -33,13 +43,13 @@ Note:
 
 ```powershell
 $AccessToken = "YOUR_ACCESS_TOKEN"
-$Response = Send-MSGraphRequest -AccessToken $AccessToken -Method GET -Uri '/users'
+$Response = Send-GraphRequest -AccessToken $AccessToken -Method GET -Uri '/users'
 
 #Show Data
 $Response
 ```
 
-### Example 2: **Create a New Microsoft 365 Group**
+### Example 2: **Create a New Security Group**
 
 ```powershell
 $AccessToken = "YOUR_ACCESS_TOKEN"
@@ -50,7 +60,7 @@ $Body = @{
 	securityEnabled = $true
 	groupTypes      = @()
 }
-$Response = Send-MSGraphRequest -AccessToken $AccessToken -Method POST -Uri "/groups" -Body $Body"
+$Response = Send-GraphRequest -AccessToken $AccessToken -Method POST -Uri "/groups" -Body $Body"
 
 #Show Response
 $Response
@@ -60,24 +70,46 @@ $Response
 
 ```powershell
 $AccessToken = "YOUR_ACCESS_TOKEN"
-Send-MSGraphRequest -AccessToken $AccessToken -Method GET -Uri '/groups?$select=displayName' -BetaAPI -Proxy "http://127.0.0.1:8080"
+Send-GraphRequest -AccessToken $AccessToken -Method GET -Uri '/groups?$select=displayName' -BetaAPI
 ```
 
 ### Example 4: **Using an advanced filter and a proxy**
 
 ```powershell
 $AccessToken = "YOUR_ACCESS_TOKEN"
-Send-MSGraphRequest -AccessToken $AccessToken -Method GET -Uri '/users' -QueryParameters @{ '$filter' = "startswith(displayName,'Alex')" } -Proxy "http://127.0.0.1:8080"
+Send-GraphRequest -AccessToken $AccessToken -Method GET -Uri '/users' -QueryParameters @{ '$filter' = "startswith(displayName,'Alex')" } -Proxy "http://127.0.0.1:8080"
 ```
 
 ### Example 5: **Using an additional header**
 
 ```powershell
 $AccessToken = "YOUR_ACCESS_TOKEN"
-Send-MSGraphRequest -AccessToken $AccessToken -Method GET -Uri '/users' -AdditionalHeaders @{ 'ConsistencyLevel' = 'eventual' }
+Send-GraphRequest -AccessToken $AccessToken -Method GET -Uri '/users' -AdditionalHeaders @{ 'ConsistencyLevel' = 'eventual' }
 ```
 
-## Notes
-
-- Ensure that you have **valid Microsoft Graph API permissions** before executing requests.
-- The module automatically handles **the 429 throttling errors** using **exponential backoff**.
+### Example 6: **Using an additional header to remove odata metadata**
+```powershell
+$AccessToken = "YOUR_ACCESS_TOKEN"
+$QueryParameters = @{
+    '$select' = "Id,DisplayName,IsMemberManagementRestricted"
+}
+$headers = @{ 
+    'Accept' = 'application/json;odata.metadata=none' 
+}
+Send-GraphRequest -AccessToken $AccessToken -Method GET -Uri "/directory/administrativeUnits" -QueryParameters $QueryParameters -AdditionalHeaders $headers 
+```
+### Example 7: **Catch errors**
+```powershell
+$AccessToken = "YOUR_ACCESS_TOKEN"
+try {
+    Send-GraphRequest -AccessToken $AccessToken -Method GET -Uri '/doesnotexist' -BetaAPI -ErrorAction Stop
+} catch {
+    $err = $_
+    Write-Host "[!] Auth error occurred:"
+    Write-Host "  Message     : $($err.Exception.Message)"
+    Write-Host "  FullyQualifiedErrorId : $($err.FullyQualifiedErrorId)"
+    Write-Host "  TargetURL: $($err.TargetObject)"
+    Write-Host "  Category    : $($err.CategoryInfo.Category)"
+    Write-Host "  Script Line : $($err.InvocationInfo.Line)"
+}
+```
