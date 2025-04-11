@@ -117,7 +117,7 @@ function Send-GraphRequest {
     #Define basic headers
     $Headers = @{
         Authorization  = "Bearer $AccessToken"
-        'Content-Type' = 'application/json; odata.metadata=minimal'
+        'Content-Type' = 'application/json'
         'User-Agent'   = $UserAgent
     }
 
