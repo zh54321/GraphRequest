@@ -17,6 +17,7 @@ Key features:
 Note: 
 - Cleartext access tokens can be obtained, for example, using [EntraTokenAid](https://github.com/zh54321/EntraTokenAid).
 - Use [GraphBatchRequest](https://github.com/zh54321/GraphBatchRequest) to send Batch Request to the Graph API.
+- Find first party apps with pre-consented scopes to bypass Graph API consent [GraphPreConsentExplorer](https://github.com/zh54321/GraphPreConsentExplorer)
 
 ## Parameters
 
