@@ -213,7 +213,7 @@ function Send-GraphRequest {
                     Write-Host "[*] [$StatusCode] - Retrying immediately..."
                     Start-Sleep -Seconds 0
                 } else {
-                    $Backoff = 2 * $RetryCount
+                    $Backoff = [math]::Pow(2, $RetryCount)
                     Write-Host "[*] [$StatusCode] - Retrying in $Backoff seconds..."
                     Start-Sleep -Seconds $Backoff
                 }
