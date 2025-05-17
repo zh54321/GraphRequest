@@ -38,6 +38,9 @@
 .PARAMETER Suppress404
     Supress 404 error messages
 
+.PARAMETER DisablePagination
+    If specified, prevents the function from automatically following @odata.nextLink for paginated results.
+
 .PARAMETER AdditionalHeaders
     Add additional headers, example -AdditionalHeaders @{ 'ConsistencyLevel' = 'eventual' }
 
@@ -93,6 +96,7 @@ function Send-GraphRequest {
         [string]$UserAgent = 'PowerShell GraphRequest Module',
         [switch]$RawJson,
         [string]$Proxy,
+        [switch]$DisablePagination,
         [switch]$VerboseMode,
         [switch]$Suppress404,
         [hashtable]$QueryParameters,
@@ -164,7 +168,7 @@ function Send-GraphRequest {
             }
 
             # Pagination handling
-            while ($Response.'@odata.nextLink') {
+            while ($Response.'@odata.nextLink' -and -not $DisablePagination) {
                 if ($VerboseMode) { Write-Host "[*] Following pagination link: $($Response.'@odata.nextLink')" }
 
                 $irmParams.Uri = $Response.'@odata.nextLink'

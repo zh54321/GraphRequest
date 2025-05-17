@@ -34,6 +34,7 @@ Note:
 | `-Proxy`                     | Use a Proxy (e.g. http://127.0.0.1:8080)                                                    |
 | `-Body`					   | Request body as PowerShell hashtable/object (will be converted to JSON).                    |
 | `-QueryParameters`           | Query parameters for more complex queries                                                   |
+| `-DisablePagination`         | Prevents the function from automatically following @odata.nextLink for paginated results.   |
 | `-AdditionalHeaders`         | Add additional HTTP headers (e.g. for ConsistencyLevel)                                     |
 | `-JsonDepthResponse` *(Default: 10)* | Specifies the depth for JSON conversion (request). Useful for deeply nested objects in combination with `-RawJson`.  |
 | `-$Suppress404`              | Supress 404 Messages (example if a queried User object is not found in the tenant)          |          
@@ -114,3 +115,14 @@ try {
     Write-Host "  Script Line : $($err.InvocationInfo.Line)"
 }
 ```
+### Example 8: **Get only one result by disabling pagination**
+```powershell
+$AccessToken = "YOUR_ACCESS_TOKEN"
+$QueryParameters = @{
+    '$select' = "id,SignInActivity"
+    '$top' = "1"
+}
+Send-GraphRequest -AccessToken $AccessToken -Method GET -Uri "/users" -QueryParameters $QueryParameters -DisablePagination
+```
+
+
