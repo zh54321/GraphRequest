@@ -8,6 +8,10 @@
 .PARAMETER AccessToken
     OAuth token for Microsoft Graph authentication.
 
+.PARAMETER AccessTokenProvider
+    Script block that returns a current OAuth token. The provider is invoked immediately before
+    every HTTP request, including pagination requests and retries.
+
 .PARAMETER Method
     HTTP method (GET, POST, PUT, PATCH, DELETE).
 
@@ -18,7 +22,8 @@
     Request body as PowerShell hashtable/object.
 
 .PARAMETER MaxRetries
-    Maximum retry attempts. Default: 5.
+    Maximum consecutive retry attempts for an individual request. A successful request resets
+    the retry count. Default: 5.
 
 .PARAMETER BetaAPI
     Switch to use Beta API endpoint.
@@ -51,6 +56,9 @@
     Send-GraphRequest -AccessToken $token -Method GET -Uri '/users'
 
 .EXAMPLE
+    Send-GraphRequest -AccessTokenProvider { Get-CurrentGraphToken } -Method GET -Uri '/users'
+
+.EXAMPLE
     Send-GraphRequest -AccessToken $token -Method GET -Uri '/groups?$select=displayName' -VerboseMode
 
 .EXAMPLE
@@ -79,10 +87,13 @@
 #>
 
 function Send-GraphRequest {
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName = 'Token')]
     param (
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory, ParameterSetName = 'Token')]
         [string]$AccessToken,
+
+        [Parameter(Mandatory, ParameterSetName = 'Provider')]
+        [scriptblock]$AccessTokenProvider,
 
         [Parameter(Mandatory)]
         [ValidateSet("GET", "POST", "PATCH", "PUT", "DELETE")]
@@ -118,9 +129,8 @@ function Send-GraphRequest {
     }
     
 
-    #Define basic headers
+    #Define basic headers. Authorization is resolved immediately before each request.
     $Headers = @{
-        Authorization  = "Bearer $AccessToken"
         'Content-Type' = 'application/json'
         'User-Agent'   = $UserAgent
     }
@@ -131,7 +141,7 @@ function Send-GraphRequest {
     }
 
     $RetryCount = 0
-    $Results = @()
+    $Results = [System.Collections.Generic.List[object]]::new()
 
     # Prepare Invoke-RestMethod parameters
     $irmParams = @{
@@ -154,17 +164,26 @@ function Send-GraphRequest {
         try {
             if ($VerboseMode) { Write-Host "[*] Request [$Method]: $FullUri" }
 
+            $CurrentAccessToken = if ($PSCmdlet.ParameterSetName -eq 'Provider') {
+                & $AccessTokenProvider
+            } else {
+                $AccessToken
+            }
+            if ([string]::IsNullOrWhiteSpace([string]$CurrentAccessToken)) {
+                throw [System.InvalidOperationException]::new('The access token provider returned an empty token.')
+            }
+            $irmParams.Headers['Authorization'] = "Bearer $CurrentAccessToken"
             $Response = Invoke-RestMethod @irmParams
+            $RetryCount = 0
 
             if ($Response.PSObject.Properties.Name -contains 'value') {
                 if ($Response.value.Count -eq 0) {
-                    if ($VerboseMode) { Write-Host "[i] Empty 'value' array detected. Returning nothing." }
-                    return
+                    if ($VerboseMode) { Write-Host "[i] Empty 'value' array detected on current page." }
                 } else {
-                    $Results += $Response.value
+                    $Results.AddRange([object[]]$Response.value)
                 }
             } else {
-                $Results += $Response
+                $Results.Add($Response)
             }
 
             # Pagination handling
@@ -175,16 +194,25 @@ function Send-GraphRequest {
                 # Remove Body for paginated GET requests
                 $irmParams.Remove('Body')
 
+                $CurrentAccessToken = if ($PSCmdlet.ParameterSetName -eq 'Provider') {
+                    & $AccessTokenProvider
+                } else {
+                    $AccessToken
+                }
+                if ([string]::IsNullOrWhiteSpace([string]$CurrentAccessToken)) {
+                    throw [System.InvalidOperationException]::new('The access token provider returned an empty token.')
+                }
+                $irmParams.Headers['Authorization'] = "Bearer $CurrentAccessToken"
                 $Response = Invoke-RestMethod @irmParams
+                $RetryCount = 0
                 if ($Response.PSObject.Properties.Name -contains 'value') {
                     if ($Response.value.Count -eq 0) {
-                        if ($VerboseMode) { Write-Host "[i] Empty 'value' array detected. Returning nothing." }
-                        return
+                        if ($VerboseMode) { Write-Host "[i] Empty 'value' array detected on current page." }
                     } else {
-                        $Results += $Response.value
+                        $Results.AddRange([object[]]$Response.value)
                     }
                 } else {
-                    $Results += $Response
+                    $Results.Add($Response)
                 }
             }
 

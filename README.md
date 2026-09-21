@@ -7,7 +7,8 @@ The `GraphRequest` PowerShell module allows to send single requests to the Micro
 Key features:
 - Handles Microsoft Graph v1.0 and Beta APIs
 - Automatic Pagination Support
-- Retry Logic with exponential Backoff for transient errors (e.g. 429, 503)
+- Retry Logic with exponential Backoff for transient errors (e.g. 429, 503). The retry budget resets after each successful page.
+- Optional token provider for refreshing authentication during long-running pagination
 - Custom Headers and Query Parameters for flexible API queries
 - Optional Raw JSON Output
 - Simple HTTP Proxy Support (for debugging)
@@ -23,14 +24,15 @@ Note:
 
 | Parameter                    | Description                                                                                 |
 | ---------------------------- | ------------------------------------------------------------------------------------------- |
-| `-AccessToken` *(Mandatory)* | The OAuth access token to authenticate against Microsoft Graph API.                         |
+| `-AccessToken` *(Mandatory in Token parameter set)* | The OAuth access token to authenticate against Microsoft Graph API.             |
+| `-AccessTokenProvider` *(Mandatory in Provider parameter set)* | Script block invoked before every request (incl. pagination/retries). Must return a valid token and handle refresh itself. |
 | `-Method`      *(Mandatory)* | HTTP Method to use (GET, POST, PATCH, PUT, DELETE)                                          |
 | `-Uri`         *(Mandatory)* | Relative Graph URI (e.g. /users)                                                            |
 | `-VerboseMode`               | Enables verbose logging to provide additional information about request processing.         |
 | `-UserAgent`                 | Custom UserAgent                                                                            |
 | `-BetaAPI`                   | If specified, uses the Microsoft Graph `Beta` endpoint instead of `v1.0`.                   |
 | `-RawJson`                   | If specified, returns the response as a raw JSON string instead of a PowerShell object.     |
-| `-MaxRetries` *(Default: 5)* | Specifies the maximum number of retry attempts for failed requests.                         |
+| `-MaxRetries` *(Default: 5)* | Maximum consecutive retry attempts for an individual request. A successful request resets the count. |
 | `-Proxy`                     | Use a Proxy (e.g. http://127.0.0.1:8080)                                                    |
 | `-Body`					   | Request body as PowerShell hashtable/object (will be converted to JSON).                    |
 | `-QueryParameters`           | Query parameters for more complex queries                                                   |
@@ -123,6 +125,13 @@ $QueryParameters = @{
     '$top' = "1"
 }
 Send-GraphRequest -AccessToken $AccessToken -Method GET -Uri "/users" -QueryParameters $QueryParameters -DisablePagination
+```
+
+### Example 9: **Refresh authentication during long-running pagination**
+
+```powershell
+# Get-CurrentGraphAccessToken is caller-owned and may cache or renew the token as needed.
+Send-GraphRequest -AccessTokenProvider { Get-CurrentGraphAccessToken } -Method GET -Uri '/users'
 ```
 
 
